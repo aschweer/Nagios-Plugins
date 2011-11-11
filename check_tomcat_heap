@@ -1,0 +1,56 @@
+#!/usr/bin/python
+
+import nagiosplugin
+import subprocess
+
+class JavaGenSizeCheck(nagiosplugin.Check):
+	name = 'Check usage of specified Java generation'
+	version = '0.1'
+
+	def __init__(self, optparser, logger):
+		optparser.description = 'Check usage of specified Java generation'
+		optparser.version = '0.1'
+		optparser.add_option(
+			'-g', '--generation', default='OG', metavar='STRING',
+			help='generation to monitor (NG, OG, PG; default: %default)')
+		optparser.add_option(
+			'-w', '--warning', default='90', metavar='RANGE',
+			help='warning threshold in % (default: %default%)')
+		optparser.add_option(
+			'-c', '--critical', default='95', metavar='RANGE',
+			help='critical threshold in % (default: %default%)')
+		self.logger = logger
+
+	def process_args(self, options, args):
+		self.generation = options.generation # TODO make sure it's one of NG, OG, PG
+		self.warning = options.warning.rstrip('%')
+		self.critical = options.critical.rstrip('%')
+
+	def obtain_data(self):
+		jstat = self.get_jstat_data() 
+		self.current_size = jstat[self.generation + "C"]
+		self.current_capacity = jstat[self.generation + "CMX"]
+		self.usage = (self.current_size / self.current_capacity) * 100
+		self.measures = [nagiosplugin.Measure(self.generation + "_percent", self.usage, '%', self.warning, self.critical, 0, 100)] 
+
+	def default_message(self):
+		return '%s currently uses %.2f%% of its capacity (%dK of %dK)' % (self.generation, self.usage, self.current_size, self.current_capacity)
+
+	def get_jstat_data(self):
+		pid = subprocess.check_output("jps  | grep Bootstrap | cut -d ' ' -f1", shell=True)
+		self.logger.info(pid)
+		# TODO raise exception if no pid found
+		data = subprocess.check_output(["jstat", "-gccapacity", pid.rstrip()])
+		# TODO raise exception if jstat call fails
+		lines = data.splitlines()
+		headers = lines[0].split()
+		values = lines[1].split()
+		# TODO raise exception if headers/values don't exist or are unequal length
+		data_map = {}
+		for i in range(len(headers) - 1):
+			data_map[headers[i]] = float(values[i].rstrip(".0"))
+		return data_map
+
+main = nagiosplugin.Controller(JavaGenSizeCheck)
+if __name__ == '__main__':
+	main()

@@ -1,0 +1,68 @@
+#!/usr/bin/python
+
+import nagiosplugin
+import subprocess
+
+class JavaGCFreqCheck(nagiosplugin.Check):
+	name = 'Check frequency of garbage collections'
+	version = '0.1'
+
+	def __init__(self, optparser, logger):
+		optparser.description = 'Check frequency of garbage collections'
+		optparser.version = '0.1'
+		optparser.add_option(
+			'-s', '--scope', default='F', metavar='STRING',
+			help='type of GC to monitor (F/Y; default: %default)')
+		optparser.add_option(
+			'-w', '--warning', default='2', metavar='RANGE',
+			help='warning threshold in % (default: %default%)')
+		optparser.add_option(
+			'-c', '--critical', default='4', metavar='RANGE',
+			help='critical threshold in % (default: %default%)')
+		self.logger = logger
+		self.has_true_delta = False
+
+	def process_args(self, options, args):
+		self.scope = options.scope # TODO make sure it's one of F/Y
+		self.warning = options.warning
+		self.critical = options.critical
+
+	def obtain_data(self):
+		jstat = self.get_jstat_data() 
+		self.total = jstat[self.scope + "GC"]
+
+		self.delta = 0
+		cookie = nagiosplugin.Cookie('tomcat-' + self.scope + 'GC-total')
+		total_from_cookie = cookie.get()
+		cookie.set("%i" % self.total)
+		cookie.close()
+		if total_from_cookie:
+			previous_total = int(total_from_cookie.strip())
+			if previous_total <= self.total:
+				self.delta = self.total - previous_total
+				self.has_true_delta = True
+		else:
+			raise Exception("No previous total found")
+		self.measures = [nagiosplugin.Measure(self.scope + "GC_delta", self.delta, None, self.warning, self.critical, 0, None)] 
+	
+	def default_message(self):
+		return '%i %s garbage collections since last check (%i since program started)' % (self.delta, self.scope, self.total)
+
+	def get_jstat_data(self):
+		pid = subprocess.check_output("jps  | grep Bootstrap | cut -d ' ' -f1", shell=True)
+		self.logger.info(pid)
+		# TODO raise exception if no pid found
+		data = subprocess.check_output(["jstat", "-gccapacity", pid.rstrip()])
+		# TODO raise exception if jstat call fails
+		lines = data.splitlines()
+		headers = lines[0].split()
+		values = lines[1].split()
+		# TODO raise exception if headers/values don't exist or are unequal length
+		data_map = {}
+		for i in range(len(headers)):
+			data_map[headers[i]] = int(values[i].rstrip(".0"))
+		return data_map
+
+main = nagiosplugin.Controller(JavaGCFreqCheck)
+if __name__ == '__main__':
+	main()
