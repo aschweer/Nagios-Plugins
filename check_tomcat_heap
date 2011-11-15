@@ -3,6 +3,26 @@
 import nagiosplugin
 import subprocess
 
+def check_output(*popenargs, **kwargs):
+    r"""Run command with arguments and return its output as a byte string.
+
+    Backported from Python 2.7 as it's implemented as pure python on stdlib.
+
+    >>> check_output(['/usr/bin/python', '--version'])
+    Python 2.6.2
+    """
+    process = subprocess.Popen(stdout=subprocess.PIPE, *popenargs, **kwargs)
+    output, unused_err = process.communicate()
+    retcode = process.poll()
+    if retcode:
+        cmd = kwargs.get("args")
+        if cmd is None:
+            cmd = popenargs[0]
+        error = subprocess.CalledProcessError(retcode, cmd)
+        error.output = output
+        raise error
+    return output
+
 class JavaGenSizeCheck(nagiosplugin.Check):
 	name = 'Check usage of specified Java generation'
 	version = '0.1'
@@ -37,10 +57,10 @@ class JavaGenSizeCheck(nagiosplugin.Check):
 		return '%s currently uses %.2f%% of its capacity (%dK of %dK)' % (self.generation, self.usage, self.current_size, self.current_capacity)
 
 	def get_jstat_data(self):
-		pid = subprocess.check_output("jps  | grep Bootstrap | cut -d ' ' -f1", shell=True)
+		pid = check_output("jps  | grep Bootstrap | cut -d ' ' -f1", shell=True)
 		self.logger.info(pid)
 		# TODO raise exception if no pid found
-		data = subprocess.check_output(["jstat", "-gccapacity", pid.rstrip()])
+		data = check_output(["jstat", "-gccapacity", pid.rstrip()])
 		# TODO raise exception if jstat call fails
 		lines = data.splitlines()
 		headers = lines[0].split()
@@ -54,3 +74,5 @@ class JavaGenSizeCheck(nagiosplugin.Check):
 main = nagiosplugin.Controller(JavaGenSizeCheck)
 if __name__ == '__main__':
 	main()
+
+
